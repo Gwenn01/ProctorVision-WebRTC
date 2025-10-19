@@ -3,8 +3,11 @@ from collections import defaultdict, deque
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaBlackhole
 from flask import Blueprint, request, jsonify
-from database.connection import get_db_connection  # ✅ direct DB connection
 from flask_cors import CORS
+
+# ✅ Import async background DB helpers
+from services.behavior_service import save_behavior_log_async
+from services.instructor_service import increment_suspicious_for_student_async
 
 # ----------------------------------------------------------------------
 # CONFIGURATION
@@ -21,6 +24,7 @@ CORS(
     supports_credentials=True,
 )
 
+ENABLE_FLIP = False  # Set True if camera appears mirrored
 SUMMARY_EVERY_S = float(os.getenv("PROCTOR_SUMMARY_EVERY_S", "1.0"))
 RECV_TIMEOUT_S = float(os.getenv("PROCTOR_RECV_TIMEOUT_S", "5.0"))
 HEARTBEAT_S = float(os.getenv("PROCTOR_HEARTBEAT_S", "10.0"))
@@ -84,7 +88,7 @@ def _bbox_from_landmarks(lms, w, h, pad=0.03):
     return (int(x1n * w), int(y1n * h), int(x2n * w), int(y2n * h))
 
 # Thresholds
-YAW_DEG_TRIG, PITCH_UP, PITCH_DOWN = 6, 7, 11
+YAW_DEG_TRIG, PITCH_UP, PITCH_DOWN = 4, 6, 9
 SMOOTH_N, CAPTURE_MIN_MS = 5, 1200
 
 class ProctorDetector:
@@ -96,35 +100,37 @@ class ProctorDetector:
     def _pose_angles(self, lms, w, h):
         try:
             pts2d = _landmarks_to_pts(lms, w, h)
-            cam = np.array([[w, 0, w/2], [0, h, h/2], [0, 0, 1]], dtype=np.float32)
-            ok, rvec, _ = cv2.solvePnP(MODEL_3D, pts2d, cam, np.zeros((4,1)))
+            cam = np.array([[w, 0, w / 2], [0, h, h / 2], [0, 0, 1]], dtype=np.float32)
+            ok, rvec, _ = cv2.solvePnP(MODEL_3D, pts2d, cam, np.zeros((4, 1)))
             if not ok:
+                log("POSE_FAIL")
                 return None, None
             R, _ = cv2.Rodrigues(rvec)
             _, _, euler = cv2.RQDecomp3x3(R)
             pitch, yaw, _ = map(float, euler)
+            print(f"[DEBUG:POSE] yaw={yaw:.2f}  pitch={pitch:.2f}", flush=True)
             return yaw, pitch
         except Exception as e:
             log("POSE_ERR", err=str(e))
+            traceback.print_exc()
             return None, None
 
     def detect(self, bgr, sid="-", eid="-"):
         try:
             h, w = bgr.shape[:2]
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-            rgb = cv2.flip(rgb, 1)
+            if ENABLE_FLIP:
+                rgb = cv2.flip(rgb, 1)
             res = face_mesh.process(rgb)
-
             if not res.multi_face_landmarks:
                 self.noface_streak += 1
-                log("NO_FACE_FRAME", sid, eid, streak=self.noface_streak)
+                print(f"[DEBUG:NO_FACE] streak={self.noface_streak}", flush=True)
                 return "No Face", None, rgb
-
             self.noface_streak = 0
             lms = res.multi_face_landmarks[0].landmark
             yaw, pitch = self._pose_angles(lms, w, h)
             label = "Looking Forward"
-
+            print(f"[DEBUG:THRESH] yawTrig={YAW_DEG_TRIG} pitchUp={PITCH_UP} pitchDown={PITCH_DOWN}", flush=True)
             if yaw is not None and pitch is not None:
                 if abs(yaw) > YAW_DEG_TRIG:
                     label = "Looking Left" if yaw < 0 else "Looking Right"
@@ -132,15 +138,11 @@ class ProctorDetector:
                     label = "Looking Down"
                 elif pitch < -PITCH_UP:
                     label = "Looking Up"
-
+            print(f"[DEBUG:FRAME] sid={sid} eid={eid} → yaw={yaw:.2f if yaw else 0} pitch={pitch:.2f if pitch else 0} label={label}", flush=True)
             if time.time() - self.last_print > 1.5:
-                log("ANGLES", sid, eid, yaw=round(yaw or 0, 2),
-                    pitch=round(pitch or 0, 2), label=label)
+                log("ANGLES", sid, eid, yaw=round(yaw or 0, 2), pitch=round(pitch or 0, 2), label=label)
                 self.last_print = time.time()
-
-            log("FACE_DETECTED", sid, eid, label=label)
             return label, _bbox_from_landmarks(lms, w, h), rgb
-
         except Exception as e:
             log("DETECT_EXCEPTION", sid, eid, err=str(e))
             traceback.print_exc()
@@ -153,7 +155,7 @@ class ProctorDetector:
                 self.hand_streak = 0
                 return None
             self.hand_streak += 1
-            log("HAND_DETECTED", sid, eid, count=len(res.multi_hand_landmarks))
+            print(f"[DEBUG:HAND] Detected {len(res.multi_hand_landmarks)} hand(s)", flush=True)
             return "Hand Detected"
         except Exception as e:
             log("HAND_ERR", sid, eid, err=str(e))
@@ -168,7 +170,7 @@ class ProctorDetector:
 detectors = defaultdict(ProctorDetector)
 
 # ----------------------------------------------------------------------
-# CAPTURE HANDLER — SAVES DIRECTLY TO MYSQL
+# CAPTURE HANDLER (Now uses async services)
 # ----------------------------------------------------------------------
 def _maybe_capture(student_id: str, exam_id: str, bgr, label: str):
     try:
@@ -176,28 +178,12 @@ def _maybe_capture(student_id: str, exam_id: str, bgr, label: str):
         if not ok:
             log("CAPTURE_SKIP", student_id, exam_id, reason="encode_failed")
             return
-
         img_b64 = base64.b64encode(buf).decode("utf-8")
         log("CAPTURE_TRIGGERED", student_id, exam_id, label=label, bytes=len(buf))
 
-        # ✅ Direct database insertion
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Insert into behavior_logs
-        cursor.execute("""
-            INSERT INTO behavior_logs (student_id, exam_id, image_base64, warning_type, created_at)
-            VALUES (%s, %s, %s, %s, NOW())
-        """, (student_id, exam_id, img_b64, label))
-
-        # Update suspicious count
-        cursor.execute("""
-            UPDATE students SET suspicious_count = suspicious_count + 1 WHERE id = %s
-        """, (student_id,))
-
-        conn.commit()
-        cursor.close()
-        conn.close()
+        # ✅ Async background operations
+        save_behavior_log_async(student_id, exam_id, img_b64, label)
+        increment_suspicious_for_student_async(student_id)
 
         ts = int(time.time() * 1000)
         last_capture[(student_id, exam_id)] = {"label": label, "at": ts}
@@ -213,12 +199,10 @@ async def _wait_ice_complete(pc):
     if pc.iceGatheringState == "complete":
         return
     done = asyncio.Event()
-
     @pc.on("icegatheringstatechange")
     def _(_ev=None):
         if pc.iceGatheringState == "complete":
             done.set()
-
     await asyncio.wait_for(done.wait(), timeout=5.0)
 
 async def handle_offer(data):
@@ -257,7 +241,6 @@ async def handle_offer(data):
                     log("TRACK_RECV_ERR", sid, eid, err=str(e))
                     traceback.print_exc()
                     break
-
                 try:
                     bgr = frame.to_ndarray(format="bgr24")
                     head_label, _, rgb = det.detect(bgr, sid, eid)
@@ -266,7 +249,6 @@ async def handle_offer(data):
                     ts = int(time.time() * 1000)
                     last_warning[(sid, eid)] = {"warning": warn, "at": ts}
                     log("DETECTION_RESULT", sid, eid, warn=warn)
-
                     if det._throttle_ok() and warn not in ("Looking Forward", None, "No Face"):
                         _maybe_capture(sid, eid, bgr, warn)
                         det._mark_captured()
@@ -274,7 +256,6 @@ async def handle_offer(data):
                     log("DETECT_ERR", sid, eid, err=str(e))
                     traceback.print_exc()
                     continue
-
         asyncio.ensure_future(reader(), loop=_loop)
 
     await pc.setRemoteDescription(offer)
@@ -319,8 +300,6 @@ def proctor_last_capture():
         return jsonify(error="missing student_id or exam_id"), 400
     return jsonify(last_capture.get((sid, eid), {"label": None, "at": 0}))
 
-
-# ✅ Global CORS header injection for every response
 @webrtc_bp.after_request
 def apply_cors(response):
     response.headers["Access-Control-Allow-Origin"] = "https://proctor-vision-client.vercel.app"
