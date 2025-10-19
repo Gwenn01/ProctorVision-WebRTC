@@ -53,4 +53,4 @@ EXPOSE 8080
 # ------------------------------------------------------------
 # ✅ Start Flask app using Gunicorn (production)
 # ------------------------------------------------------------
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app:app"]
+CMD gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 0 --log-level info app:app
