@@ -35,17 +35,22 @@ CORS(
 )
 
 # -------------------------------------------------------------
-# ✅ Import WebRTC Blueprint
+# ✅ Import WebRTC & Xirsys Blueprints
 # -------------------------------------------------------------
 try:
-    print("🔍 Importing WebRTC Blueprint...")
+    print("🔍 Importing WebRTC and Xirsys Blueprints...")
+
+    # Import both route modules
     from routes.webrtc_routes import webrtc_bp
     from routes.xirsys_routes import xirsys_bp
+
+    # Register both blueprints (no prefix)
     app.register_blueprint(webrtc_bp)
     app.register_blueprint(xirsys_bp)
-    print("✅ WebRTC Blueprint registered successfully.")
+
+    print("✅ Blueprints registered successfully.")
 except Exception as e:
-    print(f"⚠️ Failed to import WebRTC Blueprint: {e}")
+    print(f"⚠️ Blueprint import failed: {e}")
 
 # -------------------------------------------------------------
 # ✅ Global CORS Header Injection (Fallback)
@@ -72,22 +77,21 @@ def home():
     })
 
 # -------------------------------------------------------------
-# ✅ Debug Route — Show incoming origin (for CORS diagnostics)
+# ✅ Debug — Print incoming origin (for CORS)
 # -------------------------------------------------------------
 @app.before_request
 def debug_origin():
     print(">>> Incoming request from origin:", request.origin or "Unknown")
 
 # -------------------------------------------------------------
-# ✅ Startup Log — Show all available routes
+# ✅ Show All Routes on Startup
 # -------------------------------------------------------------
 print("✅ WebRTC server boot completed — available routes:")
 try:
-    from routes.webrtc_routes import webrtc_bp  # Ensures registration before listing
     for rule in app.url_map.iter_rules():
         print(f"  {rule}")
-except Exception:
-    print("⚠️ Could not list routes (may not be registered yet).")
+except Exception as e:
+    print(f"⚠️ Could not list routes: {e}")
 
 # -------------------------------------------------------------
 # ✅ Entry Point
