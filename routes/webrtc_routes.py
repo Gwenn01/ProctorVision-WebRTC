@@ -1,22 +1,18 @@
-import asyncio, time, traceback, os, threading, base64, cv2, numpy as np, mediapipe as mp, requests
+import asyncio, time, traceback, os, threading, base64, cv2, numpy as np, mediapipe as mp
 from collections import defaultdict, deque
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaBlackhole
 from flask import Blueprint, request, jsonify
+from database.connection import get_db_connection  # ✅ direct DB connection
 
 # ----------------------------------------------------------------------
 # CONFIGURATION
 # ----------------------------------------------------------------------
 webrtc_bp = Blueprint("webrtc", __name__)
 
-# Base URL of your main (Railway) backend
-RAILWAY_API = os.getenv("RAILWAY_API", "").rstrip("/")
-if not RAILWAY_API:
-    print("⚠️ WARNING: RAILWAY_API not set — backend communication may fail.")
-
 SUMMARY_EVERY_S = float(os.getenv("PROCTOR_SUMMARY_EVERY_S", "1.0"))
-RECV_TIMEOUT_S  = float(os.getenv("PROCTOR_RECV_TIMEOUT_S", "5.0"))
-HEARTBEAT_S     = float(os.getenv("PROCTOR_HEARTBEAT_S", "10.0"))
+RECV_TIMEOUT_S = float(os.getenv("PROCTOR_RECV_TIMEOUT_S", "5.0"))
+HEARTBEAT_S = float(os.getenv("PROCTOR_HEARTBEAT_S", "10.0"))
 
 # ----------------------------------------------------------------------
 # LOGGING UTIL
@@ -26,21 +22,6 @@ def log(event, sid="-", eid="-", **kv):
     print(f"[{event}] sid={sid} eid={eid} {tail}".strip(), flush=True)
 
 # ----------------------------------------------------------------------
-# HELPER: send background POST to Railway backend
-# ----------------------------------------------------------------------
-def _send_to_railway(endpoint, payload, sid, eid):
-    """Send POST requests asynchronously to Railway backend."""
-    def _worker():
-        try:
-            url = f"{RAILWAY_API}{endpoint}"
-            r = requests.post(url, json=payload, timeout=10)
-            if r.status_code != 200:
-                log("RAILWAY_POST_FAIL", sid, eid, code=r.status_code, msg=r.text)
-        except Exception as e:
-            log("RAILWAY_POST_ERR", sid, eid, err=str(e))
-    threading.Thread(target=_worker, daemon=True).start()
-
-# ----------------------------------------------------------------------
 # GLOBAL STATE
 # ----------------------------------------------------------------------
 _loop = asyncio.new_event_loop()
@@ -48,8 +29,10 @@ threading.Thread(target=_loop.run_forever, daemon=True).start()
 pcs = set()
 last_warning = defaultdict(lambda: {"warning": "Looking Forward", "at": 0})
 last_capture = defaultdict(lambda: {"label": None, "at": 0})
-last_metrics = defaultdict(lambda: {"yaw": None, "pitch": None, "dx": None, "dy": None,
-                                    "fps": None, "label": "n/a", "at": 0})
+last_metrics = defaultdict(lambda: {
+    "yaw": None, "pitch": None, "dx": None, "dy": None,
+    "fps": None, "label": "n/a", "at": 0
+})
 
 # ----------------------------------------------------------------------
 # MEDIAPIPE SETUP
@@ -59,7 +42,7 @@ mp_hands = mp.solutions.hands
 
 face_mesh = mp_face_mesh.FaceMesh(
     static_image_mode=False, max_num_faces=1, refine_landmarks=True,
-    min_detection_confidence=0.5, min_tracking_confidence=0.5  # relaxed threshold
+    min_detection_confidence=0.5, min_tracking_confidence=0.5
 )
 hands = mp_hands.Hands(
     static_image_mode=False, max_num_hands=2,
@@ -87,9 +70,9 @@ def _bbox_from_landmarks(lms, w, h, pad=0.03):
     xs = [p.x for p in lms]; ys = [p.y for p in lms]
     x1n, y1n = max(0.0, min(xs) - pad), max(0.0, min(ys) - pad)
     x2n, y2n = min(1.0, max(xs) + pad), min(1.0, max(ys) + pad)
-    return (int(x1n*w), int(y1n*h), int(x2n*w), int(y2n*h))
+    return (int(x1n * w), int(y1n * h), int(x2n * w), int(y2n * h))
 
-# Tuned thresholds
+# Thresholds
 YAW_DEG_TRIG, PITCH_UP, PITCH_DOWN = 6, 7, 11
 SMOOTH_N, CAPTURE_MIN_MS = 5, 1200
 
@@ -104,7 +87,8 @@ class ProctorDetector:
             pts2d = _landmarks_to_pts(lms, w, h)
             cam = np.array([[w, 0, w/2], [0, h, h/2], [0, 0, 1]], dtype=np.float32)
             ok, rvec, _ = cv2.solvePnP(MODEL_3D, pts2d, cam, np.zeros((4,1)))
-            if not ok: return None, None
+            if not ok:
+                return None, None
             R, _ = cv2.Rodrigues(rvec)
             _, _, euler = cv2.RQDecomp3x3(R)
             pitch, yaw, _ = map(float, euler)
@@ -117,7 +101,7 @@ class ProctorDetector:
         try:
             h, w = bgr.shape[:2]
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-            rgb = cv2.flip(rgb, 1)  # ✅ flip horizontally for mirrored webcam
+            rgb = cv2.flip(rgb, 1)
             res = face_mesh.process(rgb)
 
             if not res.multi_face_landmarks:
@@ -137,12 +121,10 @@ class ProctorDetector:
                     label = "Looking Down"
                 elif pitch < -PITCH_UP:
                     label = "Looking Up"
-                else:
-                    label = "Looking Forward"
 
-            # Detailed angles log
             if time.time() - self.last_print > 1.5:
-                log("ANGLES", sid, eid, yaw=round(yaw or 0, 2), pitch=round(pitch or 0, 2), label=label)
+                log("ANGLES", sid, eid, yaw=round(yaw or 0, 2),
+                    pitch=round(pitch or 0, 2), label=label)
                 self.last_print = time.time()
 
             log("FACE_DETECTED", sid, eid, label=label)
@@ -167,13 +149,15 @@ class ProctorDetector:
             return None
 
     def _throttle_ok(self):
-        return int(time.time()*1000) - self.last_capture_ms >= CAPTURE_MIN_MS
-    def _mark_captured(self): self.last_capture_ms = int(time.time()*1000)
+        return int(time.time() * 1000) - self.last_capture_ms >= CAPTURE_MIN_MS
+
+    def _mark_captured(self):
+        self.last_capture_ms = int(time.time() * 1000)
 
 detectors = defaultdict(ProctorDetector)
 
 # ----------------------------------------------------------------------
-# CAPTURE HANDLER — SENDS TO RAILWAY
+# CAPTURE HANDLER — SAVES DIRECTLY TO MYSQL
 # ----------------------------------------------------------------------
 def _maybe_capture(student_id: str, exam_id: str, bgr, label: str):
     try:
@@ -185,16 +169,24 @@ def _maybe_capture(student_id: str, exam_id: str, bgr, label: str):
         img_b64 = base64.b64encode(buf).decode("utf-8")
         log("CAPTURE_TRIGGERED", student_id, exam_id, label=label, bytes=len(buf))
 
-        _send_to_railway("/api/save_behavior_log", {
-            "user_id": int(student_id),
-            "exam_id": int(exam_id),
-            "image_base64": img_b64,
-            "warning_type": label
-        }, student_id, exam_id)
+        # ✅ Direct database insertion
+        conn = get_db_connection()
+        cursor = conn.cursor()
 
-        _send_to_railway("/api/increment_suspicious", {
-            "student_id": int(student_id)
-        }, student_id, exam_id)
+        # Insert into behavior_logs
+        cursor.execute("""
+            INSERT INTO behavior_logs (student_id, exam_id, image_base64, warning_type, created_at)
+            VALUES (%s, %s, %s, %s, NOW())
+        """, (student_id, exam_id, img_b64, label))
+
+        # Update suspicious count
+        cursor.execute("""
+            UPDATE students SET suspicious_count = suspicious_count + 1 WHERE id = %s
+        """, (student_id,))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
 
         ts = int(time.time() * 1000)
         last_capture[(student_id, exam_id)] = {"label": label, "at": ts}
@@ -207,11 +199,15 @@ def _maybe_capture(student_id: str, exam_id: str, bgr, label: str):
 # WEBRTC OFFER HANDLER
 # ----------------------------------------------------------------------
 async def _wait_ice_complete(pc):
-    if pc.iceGatheringState == "complete": return
+    if pc.iceGatheringState == "complete":
+        return
     done = asyncio.Event()
+
     @pc.on("icegatheringstatechange")
     def _(_ev=None):
-        if pc.iceGatheringState == "complete": done.set()
+        if pc.iceGatheringState == "complete":
+            done.set()
+
     await asyncio.wait_for(done.wait(), timeout=5.0)
 
 async def handle_offer(data):
@@ -237,6 +233,7 @@ async def handle_offer(data):
         if track.kind != "video":
             MediaBlackhole().addTrack(track)
             return
+
         async def reader():
             det = detectors[(sid, eid)]
             while True:
@@ -249,6 +246,7 @@ async def handle_offer(data):
                     log("TRACK_RECV_ERR", sid, eid, err=str(e))
                     traceback.print_exc()
                     break
+
                 try:
                     bgr = frame.to_ndarray(format="bgr24")
                     head_label, _, rgb = det.detect(bgr, sid, eid)
@@ -257,6 +255,7 @@ async def handle_offer(data):
                     ts = int(time.time() * 1000)
                     last_warning[(sid, eid)] = {"warning": warn, "at": ts}
                     log("DETECTION_RESULT", sid, eid, warn=warn)
+
                     if det._throttle_ok() and warn not in ("Looking Forward", None, "No Face"):
                         _maybe_capture(sid, eid, bgr, warn)
                         det._mark_captured()
@@ -264,6 +263,7 @@ async def handle_offer(data):
                     log("DETECT_ERR", sid, eid, err=str(e))
                     traceback.print_exc()
                     continue
+
         asyncio.ensure_future(reader(), loop=_loop)
 
     await pc.setRemoteDescription(offer)
