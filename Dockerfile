@@ -37,7 +37,6 @@ WORKDIR /app
 # ------------------------------------------------------------
 COPY requirements.txt .
 
-# Upgrade pip and install dependencies
 RUN pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -47,11 +46,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # ------------------------------------------------------------
-# ✅ Expose the correct port (Railway = 8080)
+# ✅ Expose correct port for Railway
 # ------------------------------------------------------------
 EXPOSE 8080
 
 # ------------------------------------------------------------
-# ✅ Start Flask app with Gunicorn (production)
+# ✅ Start Flask app using Gunicorn (production)
 # ------------------------------------------------------------
 CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app:app"]
