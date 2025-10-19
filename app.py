@@ -1,4 +1,5 @@
 import os
+import traceback
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
@@ -9,6 +10,9 @@ os.environ["MODEL_DIR"] = "/tmp/model"
 os.environ["MPLCONFIGDIR"] = "/tmp/matplotlib"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"   # Hide TensorFlow INFO/WARN logs
 os.environ["GLOG_minloglevel"] = "2"       # Hide Mediapipe logs
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # ✅ Disable GPU for headless env
+os.environ["MEDIAPIPE_DISABLE_GPU"] = "1"  # ✅ Force Mediapipe CPU mode
+
 os.makedirs(os.environ["MODEL_DIR"], exist_ok=True)
 os.makedirs(os.environ["MPLCONFIGDIR"], exist_ok=True)
 
@@ -27,7 +31,7 @@ CORS(
                 "http://127.0.0.1:3000",
                 "https://proctorvision-client.vercel.app",
                 "https://proctorvision-webrtc-production.up.railway.app",
-                "https://*.vercel.app"
+                "https://*.vercel.app",
             ]
         }
     },
@@ -35,22 +39,22 @@ CORS(
 )
 
 # -------------------------------------------------------------
-# ✅ Import WebRTC & Xirsys Blueprints
+# ✅ Import WebRTC & Xirsys Blueprints (with full traceback)
 # -------------------------------------------------------------
 try:
     print("🔍 Importing WebRTC and Xirsys Blueprints...")
 
-    # Import both route modules
     from routes.webrtc_routes import webrtc_bp
     from routes.xirsys_routes import xirsys_bp
 
-    # Register both blueprints (no prefix)
     app.register_blueprint(webrtc_bp)
     app.register_blueprint(xirsys_bp)
 
-    print("✅ Blueprints registered successfully.")
+    print("✅ Blueprints registered successfully!")
+
 except Exception as e:
-    print(f"⚠️ Blueprint import failed: {e}")
+    print("⚠️ Blueprint import failed! Full error below 👇")
+    traceback.print_exc()
 
 # -------------------------------------------------------------
 # ✅ Global CORS Header Injection (Fallback)
@@ -86,7 +90,7 @@ def debug_origin():
 # -------------------------------------------------------------
 # ✅ Show All Routes on Startup
 # -------------------------------------------------------------
-print("✅ WebRTC server boot completed — available routes:")
+print("\n✅ WebRTC server boot completed — listing all routes:")
 try:
     for rule in app.url_map.iter_rules():
         print(f"  {rule}")
