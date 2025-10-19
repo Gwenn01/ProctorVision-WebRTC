@@ -40,7 +40,9 @@ CORS(
 try:
     print("🔍 Importing WebRTC Blueprint...")
     from routes.webrtc_routes import webrtc_bp
+    from routes.xirsys_routes import xirsys_bp
     app.register_blueprint(webrtc_bp)
+    app.register_blueprint(xirsys_bp, url_prefix="/api")
     print("✅ WebRTC Blueprint registered successfully.")
 except Exception as e:
     print(f"⚠️ Failed to import WebRTC Blueprint: {e}")
