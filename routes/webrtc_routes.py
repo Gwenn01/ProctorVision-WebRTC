@@ -7,7 +7,7 @@ from flask_cors import CORS
 
 # ✅ Import async background DB helpers
 from services.behavior_service import save_behavior_log_async
-from services.instructor_service import increment_suspicious_for_student_async
+from services.instructor_services import increment_suspicious_for_student_async
 
 # ----------------------------------------------------------------------
 # CONFIGURATION
