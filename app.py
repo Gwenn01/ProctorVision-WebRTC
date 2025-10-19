@@ -14,17 +14,6 @@ os.makedirs(os.environ["MPLCONFIGDIR"], exist_ok=True)
 # Flask Initialization
 # -------------------------------------------------------------
 app = Flask(__name__)
-CORS(
-    app,
-    origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://proctorvision-client.vercel.app",
-        "https://proctorvision-webrtc-production.up.railway.app",
-    ],
-    supports_credentials=True,
-)
-
 
 # -------------------------------------------------------------
 # Import Blueprints (WebRTC only)
@@ -36,6 +25,20 @@ try:
     print("✅ WebRTC Blueprint registered successfully.")
 except Exception as e:
     print(f"⚠️ Failed to import WebRTC Blueprint: {e}")
+
+# -------------------------------------------------------------
+# ✅ Enable CORS *after* registering all blueprints
+# -------------------------------------------------------------
+CORS(
+    app,
+    origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://proctorvision-client.vercel.app",
+        "https://proctorvision-webrtc-production.up.railway.app",
+    ],
+    supports_credentials=True,
+)
 
 # -------------------------------------------------------------
 # Root & Health Check Route
