@@ -318,3 +318,13 @@ def proctor_last_capture():
     if not sid or not eid:
         return jsonify(error="missing student_id or exam_id"), 400
     return jsonify(last_capture.get((sid, eid), {"label": None, "at": 0}))
+
+
+# ✅ Global CORS header injection for every response
+@webrtc_bp.after_request
+def apply_cors(response):
+    response.headers["Access-Control-Allow-Origin"] = "https://proctor-vision-client.vercel.app"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
+    return response
