@@ -1,6 +1,5 @@
 import os
 from flask import Flask, jsonify
-from flask_cors import CORS
 
 # -------------------------------------------------------------
 # Environment Configuration
@@ -27,20 +26,6 @@ except Exception as e:
     print(f"⚠️ Failed to import WebRTC Blueprint: {e}")
 
 # -------------------------------------------------------------
-# ✅ Enable CORS *after* registering all blueprints
-# -------------------------------------------------------------
-CORS(
-    app,
-    origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://proctorvision-client.vercel.app",
-        "https://proctorvision-webrtc-production.up.railway.app",
-    ],
-    supports_credentials=True,
-)
-
-# -------------------------------------------------------------
 # Root & Health Check Route
 # -------------------------------------------------------------
 @app.route("/")
@@ -56,6 +41,6 @@ def home():
 # Main Entrypoint
 # -------------------------------------------------------------
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))  # Railway default port
+    port = int(os.environ.get("PORT", 8080))
     debug = os.environ.get("DEBUG", "False").lower() == "true"
     app.run(host="0.0.0.0", port=port, debug=debug)

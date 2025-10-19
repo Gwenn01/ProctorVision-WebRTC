@@ -4,11 +4,22 @@ from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaBlackhole
 from flask import Blueprint, request, jsonify
 from database.connection import get_db_connection  # ✅ direct DB connection
+from flask_cors import CORS
 
 # ----------------------------------------------------------------------
 # CONFIGURATION
 # ----------------------------------------------------------------------
 webrtc_bp = Blueprint("webrtc", __name__)
+CORS(
+    webrtc_bp,
+    origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://proctorvision-client.vercel.app",
+        "https://proctorvision-webrtc-production.up.railway.app",
+    ],
+    supports_credentials=True,
+)
 
 SUMMARY_EVERY_S = float(os.getenv("PROCTOR_SUMMARY_EVERY_S", "1.0"))
 RECV_TIMEOUT_S = float(os.getenv("PROCTOR_RECV_TIMEOUT_S", "5.0"))
