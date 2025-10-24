@@ -166,15 +166,16 @@ class ProctorDetector:
         yaw_trigger   = (yaw_s is not None and abs(yaw_s) > YAW_DEG_TRIG) or (abs(dx_s) > DX_TRIG)
 
         # For "Down", require BOTH pitch and DY to exceed higher thresholds
+        # Flip sign for pitch (positive = up, negative = down)
         pitch_down_trigger = (
-            (pitch_s is not None and pitch_s > PITCH_DEG_TRIG_DOWN) and
+            (pitch_s is not None and pitch_s < -PITCH_DEG_TRIG_DOWN) or
             (dy_s > DY_TRIG_DOWN)
         )
-        # For "Up", keep original sensitivity (OR) unless you also want stricter:
         pitch_up_trigger = (
-            (pitch_s is not None and -pitch_s > PITCH_DEG_TRIG_UP) or
+            (pitch_s is not None and pitch_s > PITCH_DEG_TRIG_UP) or
             (dy_s < -DY_TRIG_UP)
         )
+
 
         label = "Looking Forward"
         if yaw_trigger and (abs(dx_s) >= abs(dy_s) or not (pitch_up_trigger or pitch_down_trigger)):
