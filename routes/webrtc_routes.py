@@ -13,9 +13,10 @@ from services.instructor_services import increment_suspicious_for_student_async 
 webrtc_bp = Blueprint("webrtc", __name__)
 
 # -------- logging / config --------
-SUMMARY_EVERY_S = float(os.getenv("PROCTOR_SUMMARY_EVERY_S", "1.0"))
-RECV_TIMEOUT_S  = float(os.getenv("PROCTOR_RECV_TIMEOUT_S", "5.0"))   # timeout for track.recv
-HEARTBEAT_S     = float(os.getenv("PROCTOR_HEARTBEAT_S", "10.0"))     # reader heartbeat log
+SUMMARY_EVERY_S = float(os.getenv("PROCTOR_SUMMARY_EVERY_S", "1.0"))  # keep 1s for smooth updates
+RECV_TIMEOUT_S  = float(os.getenv("PROCTOR_RECV_TIMEOUT_S", "2.5"))   # faster recovery from stalls
+HEARTBEAT_S     = float(os.getenv("PROCTOR_HEARTBEAT_S", "10.0"))     # ok to keep at 10s
+    # reader heartbeat log
 
 def log(event, sid="-", eid="-", **kv):
     tail = " ".join(f"{k}={v}" for k, v in kv.items())
