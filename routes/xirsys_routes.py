@@ -9,8 +9,8 @@ xirsys_bp = Blueprint("xirsys_bp", __name__)
 @xirsys_bp.route("/get-turn", methods=["GET"])
 def get_turn_credentials():
     """Fetch dynamic TURN credentials from Xirsys"""
-    XIRSYS_USER = os.getenv("XIRSYS_USER", "chatgpt3c")
-    XIRSYS_SECRET = os.getenv("XIRSYS_SECRET", "cae385bc-b265-11f0-9f51-0242ac130002")
+    XIRSYS_USER = os.getenv("XIRSYS_USER", "nuqui")
+    XIRSYS_SECRET = os.getenv("XIRSYS_SECRET", "77438fd4-b7fa-11f0-b231-0242ac130002")
     XIRSYS_CHANNEL = os.getenv("XIRSYS_CHANNEL", "MyFirstApp")
 
     if not XIRSYS_USER or not XIRSYS_SECRET or not XIRSYS_CHANNEL:
